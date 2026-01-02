@@ -52,8 +52,6 @@ function onOpen() {
     .addItem('1. Update Lookups [Sheet.Col]', 'updateHeaderComputedColumns')
     .addItem('2. Update Short Values (_short_value)', 'updateAllComputedValues')
     .addItem('3. Build All SKUs', 'updateAllSkuCodes')
-    .addSeparator()
-    .addItem('🚀 Run All (In Order)', 'forceRunAllTriggers')
     .addToUi();
 
     
@@ -359,7 +357,9 @@ function processHeaderComputedColumns(ss, sheet, targetRowIndex = null) {
     if (!lookupEntry) return; // Skip if target sheet isn't in our dictionary
 
     const keyColumnName = lookupEntry[0]; // e.g., "contact_id"
-    const linkIdx = headerMap.indexOf(keyColumnName.toLowerCase());
+    const linkIdx = headerMap.findIndex(h => 
+  h === keyColumnName.toLowerCase() || h.endsWith('.' + keyColumnName.toLowerCase() + ']')
+);
 
     if (linkIdx === -1) return; // The current sheet is missing the required ID column
 
@@ -512,7 +512,9 @@ function parseSkuSyntax(syntax, row, headers, cache, currentSheet) {
     if (cache[tSheet]) {
       let linkColName = tSheet + "_id";
       if(tSheet === 'contacts') linkColName = 'contact_id';
-      const linkIdx = headers.indexOf(linkColName);
+   const linkIdx = headers.findIndex(h => 
+  h === linkColName || h.endsWith('.' + linkColName + ']')
+);
       if(linkIdx === -1) return "";
       
       const linkId = String(row[linkIdx]);
