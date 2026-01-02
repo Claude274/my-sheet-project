@@ -26,16 +26,28 @@ const TYPE_MAPPING = {
 
 // --- 2. MENU & NAVIGATION ---
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu(APP_TITLE)
-    .addItem('👥 Update Contacts', 'openContacts')
-    .addItem('🎨 Update Original', 'openOriginal')
-    .addItem('🖼️ Update Product', 'openProduct')
+  const ui = SpreadsheetApp.getUi();
+
+  // MENU 1: DATA MANAGEMENT (The "Backend" stuff)
+  ui.createMenu('🗄️ LAD Data')
+    .addItem('👥 Contacts', 'openContacts')
+    .addItem('🎨 Originals', 'openOriginal')
+    .addItem('🖼️ Products', 'openProduct')
     .addSeparator()
-    .addItem('📄 Generate PDF for Selected Row', 'generatePdfForSelectedRow')
-    .addItem('📦 Sync Product Inventory', 'syncProductInventory')
-    .addItem('🛒 Create New Order (POS)', 'openOrderModal')
+    .addItem('📦 Update Product Unit List', 'syncProductInventory')
+   .addSeparator()
+    .addItem('1. Update Lookups [Sheet.Col]', 'updateHeaderComputedColumns')
+    .addItem('2. Update Short Values (_short_value)', 'updateAllComputedValues')
+    .addItem('3. Build All SKUs', 'updateAllSkuCodes')
     .addSeparator()
-    .addItem('🔄 Force Update Links & SKUs', 'forceRunAllTriggers')
+    .addItem('🚀 Run All (In Order)', 'forceRunAllTriggers')
+    .addToUi();
+
+    
+  // MENU 2: ORDERS & BILLING (The "Daily" stuff)
+  ui.createMenu('🛒 LAD Orders')
+    .addItem('➕ New Customer Order', 'openOrderModal')
+    .addItem('📄 Generate PDF (Invoice/Cert)', 'generatePdfForSelectedRow')
     .addToUi();
 }
 
@@ -295,63 +307,79 @@ function updateHeaderComputedColumns() {
 function processHeaderComputedColumns(ss, sheet, targetRowIndex = null) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const headerMap = headers.map(h => String(h).toLowerCase());
+
+  // 1. Identify which columns have the [Sheet.Column] syntax
   const computed = [];
   headers.forEach((h, i) => {
     const match = String(h).match(/^\[([\w\s]+)\.([\w\s_]+)\]$/);
-    if (match) computed.push({ col: i, targetSheet: match[1], targetField: match[2] });
+    if (match) {
+      computed.push({ 
+        colIndex: i, 
+        targetSheetName: match[1], 
+        targetFieldName: match[2] 
+      });
+    }
   });
 
   if (computed.length === 0) return;
 
-  // If targeting 1 row, only read that row. Else read all.
+  // 2. Prepare Data Range (Single Row or All)
   let startRow = 2;
   let numRows = lastRow - 1;
-  let data = [];
-  
-  if (targetRowIndex) {
-    startRow = targetRowIndex;
-    numRows = 1;
-    data = sheet.getRange(startRow, 1, 1, sheet.getLastColumn()).getValues();
-  } else {
-    data = sheet.getDataRange().getValues().slice(1);
-  }
+  let data = targetRowIndex 
+    ? sheet.getRange(targetRowIndex, 1, 1, sheet.getLastColumn()).getValues()
+    : sheet.getRange(2, 1, numRows, sheet.getLastColumn()).getValues();
 
   const cache = {};
   let updated = false;
 
   computed.forEach(comp => {
-    const tKey = comp.targetSheet.toLowerCase();
+    // A. Use the LOOKUP_MAP to find the required Key for this target sheet
+    // Example: Find the entry where targetSheet is "Contacts" -> Key is "contact_id"
+    const lookupEntry = Object.entries(LOOKUP_MAP).find(([key, val]) => 
+      val.targetSheet.toLowerCase() === comp.targetSheetName.toLowerCase()
+    );
+
+    if (!lookupEntry) return; // Skip if target sheet isn't in our dictionary
+
+    const keyColumnName = lookupEntry[0]; // e.g., "contact_id"
+    const linkIdx = headerMap.indexOf(keyColumnName.toLowerCase());
+
+    if (linkIdx === -1) return; // The current sheet is missing the required ID column
+
+    // B. Lazy-load the target sheet data into a Map for high performance
+    const tKey = comp.targetSheetName.toLowerCase();
     if (!cache[tKey]) {
-      const tSheet = ss.getSheets().find(s => s.getName().toLowerCase() === tKey || s.getName().toLowerCase().includes(tKey));
+      const tSheet = ss.getSheets().find(s => s.getName().toLowerCase() === tKey);
       if (tSheet) {
         const tData = tSheet.getDataRange().getValues();
         const tMap = new Map();
-        if(tData.length > 1) {
+        if (tData.length > 1) {
           tData.slice(1).forEach(r => tMap.set(String(r[0]), r));
-          cache[tKey] = { map: tMap, headers: tData[0].map(x => String(x).toLowerCase()) };
+          cache[tKey] = { 
+            map: tMap, 
+            headers: tData[0].map(x => String(x).toLowerCase()) 
+          };
         }
       }
     }
-    
+
     const tCache = cache[tKey];
     if (!tCache) return;
 
-    let linkIdx = headers.findIndex(h => String(h).toLowerCase().includes(comp.targetSheet.toLowerCase()) && String(h).toLowerCase().includes('id'));
-    if (linkIdx === -1) linkIdx = headers.findIndex(h => String(h).toLowerCase() === 'original_id');
-    
-    if (linkIdx === -1) return;
-
-    const targetColIdx = tCache.headers.indexOf(comp.targetField.toLowerCase());
+    const targetColIdx = tCache.headers.indexOf(comp.targetFieldName.toLowerCase());
     if (targetColIdx === -1) return;
 
+    // C. Perform the Dynamic Lookup
     for (let i = 0; i < data.length; i++) {
       const linkId = String(data[i][linkIdx]);
       if (linkId && tCache.map.has(linkId)) {
         const newVal = tCache.map.get(linkId)[targetColIdx];
-        if (String(data[i][comp.col]) !== String(newVal)) {
-          data[i][comp.col] = newVal;
+        if (String(data[i][comp.colIndex]) !== String(newVal)) {
+          data[i][comp.colIndex] = newVal;
           updated = true;
         }
       }
@@ -359,7 +387,8 @@ function processHeaderComputedColumns(ss, sheet, targetRowIndex = null) {
   });
 
   if (updated) {
-    sheet.getRange(startRow, 1, data.length, data[0].length).setValues(data);
+    const writeRow = targetRowIndex || 2;
+    sheet.getRange(writeRow, 1, data.length, data[0].length).setValues(data);
   }
 }
 
@@ -457,31 +486,99 @@ function parseSkuSyntax(syntax, row, headers, cache, currentSheet) {
   }).replace(/&""-""&/g, "-").replace(/"/g, ""); 
 }
 
-// C. SHORT IDS
+/**
+ * UNIFIED AUTOMATION: Handles Dictionary Mappings, Size Logic, and Contact IDs
+ */
+
+
 function updateAllComputedValues() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('Contacts');
-  if(!sheet) return;
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0].map(h=>String(h).toLowerCase());
-  const shortIdx = headers.indexOf('contact_short_id');
-  
-  if(shortIdx > -1) {
-    let updated = false;
-    for(let i=1; i<data.length; i++) {
-       if(!data[i][shortIdx]) {
-          const fn = data[i][headers.indexOf('first_name')] || "";
-          const ln = data[i][headers.indexOf('last_name')] || "";
-          if(fn && ln) {
-             data[i][shortIdx] = (fn.substring(0,2) + ln.substring(0,2)).toUpperCase();
-             updated = true;
-          }
-       }
-    }
-    if(updated) sheet.getRange(1,1,data.length, data[0].length).setValues(data);
-  }
-}
+  const sheets = ss.getSheets();
 
+  // 1. Point 1: The Logic Dictionary for specific mappings
+  const SHORT_MAPS = {
+    "type": {
+      "Original": "OR", "Print": "PR", "Skulptur": "SC", "Sculpture": "SC",
+      "Reproduction on Paper": "RP", "Foto": "PH", "Photo": "PH", 
+      "Digital": "DG", "Digital Art": "DG"
+    },
+    "status": {
+      "Available": "AV", "Sold": "SD", "Reserved": "RS"
+    }
+  };
+
+  sheets.forEach(sheet => {
+    const range = sheet.getDataRange();
+    const data = range.getValues();
+    if (data.length < 2) return; 
+    
+    const headers = data[0].map(h => String(h).toLowerCase());
+    let updated = false;
+
+    headers.forEach((header, colIdx) => {
+      // --- POINT 2: Handle any column ending in _short_value & Size Logic ---
+      if (header.endsWith('_short_value')) {
+        const sourceBase = header.replace('_short_value', '');
+        const sourceIdx = headers.indexOf(sourceBase);
+        
+        if (sourceIdx > -1) {
+          for (let i = 1; i < data.length; i++) {
+            let sourceVal = String(data[i][sourceIdx]).trim();
+            if (!sourceVal) continue;
+
+            let newVal = "";
+
+            // A. Check Dictionary Mapping first (e.g., Digital Art -> DG)
+            if (SHORT_MAPS[sourceBase] && SHORT_MAPS[sourceBase][sourceVal]) {
+              newVal = SHORT_MAPS[sourceBase][sourceVal];
+            } 
+            // B. SIZE LOGIC: Improved to handle 30x50, 30 x 50, 30X50
+            else if (sourceBase === 'original_size') {
+              // We use a Regular Expression /x/gi (g = global, i = ignore case)
+              // This removes 'x', spaces, and any non-numeric characters like dots
+              newVal = sourceVal.toLowerCase().replace(/x/g, "").replace(/cm/g, "").replace(/\s/g, "").trim();
+              
+              // Validation: If for some reason it's still too long or has letters, 
+              // we ensure we don't fall back to the "3-letter" rule for sizes
+            }
+            // C. Fallback: Standard 3-letter shortening (ONLY for non-size columns)
+            else {
+              newVal = sourceVal.substring(0, 3).toUpperCase();
+            }
+
+            if (data[i][colIdx] !== newVal) {
+              data[i][colIdx] = newVal;
+              updated = true;
+            }
+          }
+        }
+      }
+
+      // --- POINT 3: Handle contact_short_id (Contacts only) ---
+      if (header === 'contact_short_id' && sheet.getName() === 'Contacts') {
+        const fnIdx = headers.indexOf('first_name');
+        const lnIdx = headers.indexOf('last_name');
+        if (fnIdx > -1 && lnIdx > -1) {
+          for (let i = 1; i < data.length; i++) {
+            if (!data[i][colIdx]) {
+              const fn = String(data[i][fnIdx] || "").trim();
+              const ln = String(data[i][lnIdx] || "").trim();
+              if (fn && ln) {
+                data[i][colIdx] = (fn.substring(0,2) + ln.substring(0,2)).toUpperCase();
+                updated = true;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (updated) {
+      sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+    }
+  });
+  ss.toast("Short Values, Sizes, and Contact IDs updated.");
+}
 // --- UTILS & PDF ---
 function generatePdfForSelectedRow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
