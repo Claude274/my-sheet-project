@@ -37,9 +37,8 @@ const SYSTEM_MAPPINGS = {
   }
 };
 
-// --- 2. MENU & NAVIGATION ---
 function onOpen() {
-  const ui = SpreadsheetApp.getUi();
+  const ui = SpreadsheetApp.getUi(); // <--- Line 54 or above: Ensure this is defined!
 
   // MENU 1: DATA MANAGEMENT (The "Backend" stuff)
   ui.createMenu('🗄️ LAD Data')
@@ -47,20 +46,21 @@ function onOpen() {
     .addItem('🎨 Originals', 'openOriginal')
     .addItem('🖼️ Products', 'openProduct')
     .addSeparator()
-    .addItem('📦 Update Product Unit List', 'syncProductInventory')
-   .addSeparator()
     .addItem('1. Update Lookups [Sheet.Col]', 'updateHeaderComputedColumns')
     .addItem('2. Update Short Values (_short_value)', 'updateAllComputedValues')
     .addItem('3. Build All SKUs', 'updateAllSkuCodes')
+    .addSeparator()
+    .addItem('📦 Update Product Unit List', 'syncProductInventory')
     .addToUi();
 
-    
   // MENU 2: ORDERS & BILLING (The "Daily" stuff)
-  ui.createMenu('🛒 LAD Orders')
-    .addItem('➕ New Customer Order', 'openOrderModal')
+ui.createMenu('🛒 LAD Orders')
+    .addItem('➕ New Customer Order', 'openOrderModal') // <--- Must match function name below
     .addItem('📄 Generate PDF (Invoice/Cert)', 'generatePdfForSelectedRow')
     .addToUi();
 }
+
+
 
 function openContacts() { activateAndOpen('Contacts'); }
 function openOriginal() { activateAndOpen('Original'); }
@@ -85,14 +85,24 @@ function showSidebar() {
   SpreadsheetApp.getUi().showModalDialog(html, APP_TITLE);
 }
 
+/**
+ * Launcher for the Order Modal. 
+ * This is the only part of Code.js that needs to change.
+ */
+function showOrderModal() {
+  const html = HtmlService.createHtmlOutputFromFile('OrderModal')
+      .setWidth(800)
+      .setHeight(600)
+      .setTitle('Create New Order');
+  SpreadsheetApp.getUi().showModalDialog(html, 'Create New Order');
+}
+
 function openOrderModal() {
-  try {
-    const html = HtmlService.createTemplateFromFile('OrderModal')
-      .evaluate().setTitle('🛒 New Customer Order').setWidth(900).setHeight(700);
-    SpreadsheetApp.getUi().showModalDialog(html, '🛒 New Customer Order');
-  } catch(e) {
-    SpreadsheetApp.getUi().alert("OrderModal file missing or POS not configured.");
-  }
+  const html = HtmlService.createHtmlOutputFromFile('OrderModal')
+      .setWidth(950)
+      .setHeight(750)
+      .setTitle('🛒 Create New Order');
+  SpreadsheetApp.getUi().showModalDialog(html, ' ');
 }
 
 /**
