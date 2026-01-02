@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+      body { background-color: #f3f4f6; font-family: sans-serif; height: 100vh; overflow: hidden; }
+      .scroll-area { overflow-y: auto; height: calc(100vh - 160px); }
+      .card-item:hover { transform: translateY(-2px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    </style>
+  </head>
+  <body class="p-4 flex gap-4 h-full">
+
+    <!-- LEFT COLUMN: PRODUCT SELECTION -->
+    <div class="w-2/3 flex flex-col gap-4">
+      
+      <!-- Search Bar -->
+      <div class="bg-white p-4 rounded-lg shadow flex gap-2">
+        <i class="fas fa-search text-gray-400 mt-3"></i>
+        <input type="text" id="search" placeholder="Search by name, SUK, or edition..." 
+               class="w-full p-2 outline-none text-lg" onkeyup="filterProducts()">
+      </div>
+
+      <!-- Product Grid -->
+      <div id="loading" class="text-center mt-10 text-gray-500">
+        <i class="fas fa-spinner fa-spin fa-2x"></i><br>Loading Inventory...
+      </div>
+      
+      <div id="product-list" class="grid grid-cols-2 gap-3 scroll-area content-start hidden">
+        <!-- Products injected here -->
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN: CART & CHECKOUT -->
+    <div class="w-1/3 flex flex-col gap-4">
+      
+      <!-- Customer Section -->
+      <div class="bg-white p-4 rounded-lg shadow">
+        <h3 class="font-bold text-gray-700 mb-2"><i class="fas fa-user"></i> Customer</h3>
+        
+        <!-- Select Existing -->
+        <div id="customer-select-mode">
+          <select id="contact-dropdown" class="w-full p-2 border rounded bg-gray-50 mb-2">
+            <option value="">Select Contact...</option>
+          </select>
+          <button onclick="toggleNewCustomer()" class="text-blue-500 text-sm hover:underline">
+            + Create New Customer
+          </button>
+        </div>
+
+        <!-- Create New -->
+        <div id="customer-create-mode" class="hidden space-y-2">
+          <input type="text" id="new-first" placeholder="First Name" class="w-full p-2 border rounded">
+          <input type="text" id="new-last" placeholder="Last Name" class="w-full p-2 border rounded">
+          <input type="email" id="new-email" placeholder="Email" class="w-full p-2 border rounded">
+          <div class="flex gap-2">
+            <button onclick="saveNewCustomer()" class="bg-blue-600 text-white px-3 py-1 rounded text-sm w-1/2">Save</button>
+            <button onclick="toggleNewCustomer()" class="bg-gray-200 text-gray-700 px-3 py-1 rounded text-sm w-1/2">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cart Section -->
+      <div class="bg-white p-4 rounded-lg shadow flex-grow flex flex-col">
+        <h3 class="font-bold text-gray-700 mb-2"><i class="fas fa-shopping-cart"></i> Cart (<span id="cart-count">0</span>)</h3>
+        
+        <div id="cart-items" class="flex-grow overflow-y-auto mb-4 space-y-2 border-t pt-2">
+          <div class="text-gray-400 text-center italic mt-10">Cart is empty</div>
+        </div>
+
+        <div class="border-t pt-4">
+          <div class="flex justify-between text-xl font-bold mb-4">
+            <span>Total</span>
+            <span id="cart-total">0.00 €</span>
+          </div>
+          <button onclick="submitOrder()" id="btn-checkout" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded shadow transition">
+            CONFIRM ORDER
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let inventory = [];
+      let contacts = [];
+      let cart = [];
+      let selectedContact = null;
+
+      // INITIALIZE
+      window.onload = function() {
+        google.script.run.withSuccessHandler(initData).getPosData();
+      };
+
+      function initData(data) {
+        inventory = data.inventory;
+        contacts = data.contacts;
+        
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('product-list').classList.remove('hidden');
+        
+        renderProducts(inventory);
+        populateContacts();
+      }
+
+      // RENDER PRODUCTS
+      function renderProducts(items) {
+        const container = document.getElementById('product-list');
+        container.innerHTML = items.map(item => `
+          <div onclick="addToCart('${item.unit_id}')" 
+               class="card-item bg-white p-3 rounded cursor-pointer border hover:border-blue-500 transition">
+            <div class="font-bold text-gray-800">${item.product_name}</div>
+            <div class="text-sm text-gray-500 flex justify-between mt-1">
+              <span class="bg-blue-100 text-blue-800 px-2 rounded text-xs py-0.5">${item.suk}</span>
+              <span>${item.edition}</span>
+            </div>
+            <div class="text-right font-bold text-green-600 mt-2">${formatMoney(item.price)}</div>
+          </div>
+        `).join('');
+      }
+
+      // FILTER LOGIC
+      function filterProducts() {
+        const term = document.getElementById('search').value.toLowerCase();
+        const filtered = inventory.filter(i => 
+          i.product_name.toLowerCase().includes(term) || 
+          i.suk.toLowerCase().includes(term)
+        );
+        renderProducts(filtered);
+      }
+
+      // CART LOGIC
+      function addToCart(unitId) {
+        // Prevent duplicates
+        if (cart.find(i => i.unit_id === unitId)) return;
+        
+        const item = inventory.find(i => i.unit_id === unitId);
+        cart.push(item);
+        renderCart();
+      }
+
+      function removeFromCart(index) {
+        cart.splice(index, 1);
+        renderCart();
+      }
+
+      function renderCart() {
+        const container = document.getElementById('cart-items');
+        let total = 0;
+        
+        if (cart.length === 0) {
+          container.innerHTML = '<div class="text-gray-400 text-center italic mt-10">Cart is empty</div>';
+        } else {
+          container.innerHTML = cart.map((item, idx) => {
+            total += Number(item.price);
+            return `
+              <div class="flex justify-between items-center bg-gray-50 p-2 rounded">
+                <div>
+                  <div class="font-medium text-sm truncate w-40">${item.product_name}</div>
+                  <div class="text-xs text-gray-500">${item.suk}</div>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="font-bold text-sm">${formatMoney(item.price)}</span>
+                  <button onclick="removeFromCart(${idx})" class="text-red-400 hover:text-red-600">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+        
+        document.getElementById('cart-count').innerText = cart.length;
+        document.getElementById('cart-total').innerText = formatMoney(total);
+      }
+
+      // CONTACT LOGIC
+      function populateContacts() {
+        const select = document.getElementById('contact-dropdown');
+        // Sort alphabetically
+        contacts.sort((a,b) => a.name.localeCompare(b.name));
+        
+        let html = '<option value="">Select Contact...</option>';
+        html += contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        select.innerHTML = html;
+        
+        select.onchange = (e) => {
+           const id = e.target.value;
+           selectedContact = contacts.find(c => c.id === id);
+        };
+      }
+
+      function toggleNewCustomer() {
+        const viewSelect = document.getElementById('customer-select-mode');
+        const viewCreate = document.getElementById('customer-create-mode');
+        if (viewSelect.classList.contains('hidden')) {
+           viewSelect.classList.remove('hidden');
+           viewCreate.classList.add('hidden');
+        } else {
+           viewSelect.classList.add('hidden');
+           viewCreate.classList.remove('hidden');
+        }
+      }
+
+      function saveNewCustomer() {
+        const fn = document.getElementById('new-first').value;
+        const ln = document.getElementById('new-last').value;
+        const em = document.getElementById('new-email').value;
+        
+        if (!fn || !ln) { alert("Name required"); return; }
+        
+        const btn = event.target;
+        btn.innerText = "Saving...";
+        
+        google.script.run.withSuccessHandler((newContact) => {
+           contacts.push(newContact);
+           populateContacts();
+           document.getElementById('contact-dropdown').value = newContact.id;
+           selectedContact = newContact;
+           toggleNewCustomer();
+           btn.innerText = "Save";
+        }).createContactOnFly({firstName: fn, lastName: ln, email: em});
+      }
+
+      // CHECKOUT
+      function submitOrder() {
+        if (cart.length === 0) { alert("Cart is empty"); return; }
+        if (!selectedContact) { alert("Please select a customer"); return; }
+        
+        const btn = document.getElementById('btn-checkout');
+        const originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = "PROCESSING...";
+        btn.classList.add('bg-gray-400');
+        
+        const total = cart.reduce((sum, item) => sum + Number(item.price), 0);
+        
+        const payload = {
+          contact: selectedContact,
+          items: cart,
+          total: total
+        };
+
+        google.script.run.withSuccessHandler((res) => {
+          if (res.success) {
+            alert("✅ Order Created! ID: " + res.orderId);
+            google.script.host.close();
+          } else {
+            alert("❌ Error: " + res.error);
+            btn.disabled = false;
+            btn.innerText = originalText;
+            btn.classList.remove('bg-gray-400');
+          }
+        }).submitOrder(payload);
+      }
+
+      function formatMoney(amount) {
+        return Number(amount).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+      }
+    </script>
+  </body>
+</html>
