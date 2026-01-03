@@ -15,19 +15,92 @@ const ACC_TEMPLATES = {
   }
 };
 
+
+function postToAccounting(orderData, orderId) {
+  try {
+    const accSS = SpreadsheetApp.openById(ACCOUNTING_SHEET_ID);
+    const accSheet = accSS.getSheetByName('Transactions'); // DO NOT DELETE THIS SHEET
+    
+    // Treat as Cash Sale to impact Bank and PL
+    const type = 'Cash Sale'; 
+    const template = ACC_TEMPLATES[type];
+    const transId = "TRX-" + Math.random().toString(36).substring(2, 9).toUpperCase();
+
+    accSheet.appendRow([
+      transId, new Date(), type, "Order " + orderId, orderData.contact_name, orderData.total,
+      template.debit.pcn, template.debit.name, template.debit.ecdfBS, template.debit.ecdfPL, // Bank
+      template.credit.pcn, template.credit.name, template.credit.ecdfBS, template.credit.ecdfPL, // PL (Sales)
+      0, 'One Time', '', 'Sales Event', 'Sync from Inventory'
+    ]);
+    return transId;
+  } catch (e) {
+    return "SYNC_FAILED";
+  }
+}
+
+/**
+ * Fetches contacts for the Order Modal dropdown.
+ */
+function getContactsForOrder() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Contacts");
+  if (!sheet) return [];
+  
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0].map(h => String(h).toLowerCase());
+  const idIdx = headers.indexOf("contact_id");
+  // Matches logic in Code.js for finding names
+  const fNameIdx = 3; // Column D
+  const lNameIdx = 5; // Column F
+
+  return data.slice(1).map(row => {
+    const name = `${row[fNameIdx]} ${row[lNameIdx]}`.trim();
+    return {
+      id: String(row[idIdx]),
+      name: name || String(row[idIdx])
+    };
+  }).filter(c => c.id).sort((a,b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Fetches available inventory (Product_Units) for the Order Modal grid.
+ */
+function getInventoryForOrder() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Product_Units");
+  if (!sheet) return [];
+  
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0].map(h => String(h).toLowerCase());
+  
+  const idIdx = headers.indexOf("inventory_id");
+  const skuIdx = headers.indexOf("sku_code");
+  const statusIdx = headers.indexOf("status");
+  // Assumes a price column exists or a computed [Product.price] column
+  const priceIdx = headers.findIndex(h => h.includes("price"));
+
+  return data.slice(1)
+    .filter(row => row[statusIdx] !== "Sold") // Only show available items
+    .map(row => ({
+      id: String(row[idIdx]),
+      sku: row[skuIdx] || "No SKU",
+      price: row[priceIdx] || 0
+    }))
+    .filter(item => item.id);
+}
+
 function processSaveOrder(orderData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const timestamp = new Date();
-  const orderId = "orders_" + Math.random().toString(36).substring(2, 11);
+  // Generate ID following the rule: orders_id
+  const orderId = "ORD-" + Math.random().toString(36).substring(2, 9).toUpperCase();
 
   try {
-    // 1. PUSH TO ACCOUNTING FILE FIRST
     const accRefId = postToAccounting(orderData, orderId);
 
-    // 2. LOG IN LOCAL ORDERS SHEET
-    // order_id, date, contact_id, contact_name, total_amount, items_count, sku_list, comment, payment_method, notes, accounting_id
     const orderSheet = ss.getSheetByName("Orders");
     if (orderSheet) {
+      // Column 1 is now orders_id
       orderSheet.appendRow([
         orderId, 
         timestamp, 
@@ -39,49 +112,24 @@ function processSaveOrder(orderData) {
         orderData.comment,
         orderData.payment_method,
         "Auto-synced",
-        accRefId // The link to your finance file
+        accRefId 
       ]);
     }
 
-    // 3. UPDATE INVENTORY STATUS (Produced -> Sold)
+    // Update status to Sold in Product_Units
     const invSheet = ss.getSheetByName("Product_Units");
     const invData = invSheet.getDataRange().getValues();
-    const idIdx = invData[0].map(h => String(h).toLowerCase()).indexOf("inventory_id");
-    const statusIdx = invData[0].map(h => String(h).toLowerCase()).indexOf("status");
+    const headers = invData[0].map(h => String(h).toLowerCase());
+    const idIdx = headers.indexOf("product_units_id") === -1 ? headers.indexOf("inventory_id") : headers.indexOf("product_units_id");
+    const statusIdx = headers.indexOf("status");
 
     orderData.itemIds.forEach(itemId => {
-      const rowIdx = invData.findIndex(r => r[idIdx] === itemId);
+      const rowIdx = invData.findIndex(r => String(r[idIdx]) === String(itemId));
       if (rowIdx > -1) invSheet.getRange(rowIdx + 1, statusIdx + 1).setValue("Sold");
     });
 
-    if (typeof updateAllComputedValues === 'function') updateAllComputedValues();
-    
     return { success: true, id: orderId };
-
   } catch (err) {
-    Logger.log("Critical Error in processSaveOrder: " + err.message);
     throw new Error("Order failed: " + err.message);
-  }
-}
-
-function postToAccounting(orderData, orderId) {
-  try {
-    const accSS = SpreadsheetApp.openById(ACCOUNTING_SHEET_ID);
-    const accSheet = accSS.getSheetByName('Transactions');
-    const type = (orderData.payment_method === 'Cash') ? 'Cash Sale' : 'Sales Invoice - Goods';
-    const template = ACC_TEMPLATES[type];
-    const transId = "transactions_" + Math.random().toString(36).substring(2, 11);
-
-    // Append to accounting file (19 columns)
-    accSheet.appendRow([
-      transId, new Date(), type, "Order " + orderId, orderData.contact_name, orderData.total,
-      template.debit.pcn, template.debit.name, template.debit.ecdfBS, template.debit.ecdfPL,
-      template.credit.pcn, template.credit.name, template.credit.ecdfBS, template.credit.ecdfPL,
-      0, 'One Time', 'RS', 'Sales Event', 'Sync from Inventory'
-    ]);
-    return transId;
-  } catch (e) {
-    Logger.log("Accounting Bridge Failed: " + e.message);
-    return "SYNC_FAILED";
   }
 }
