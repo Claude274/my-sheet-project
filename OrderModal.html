@@ -97,18 +97,38 @@
       document.getElementById('totalDisplay').innerText = total;
     }
 
-    function submitOrder() {
-      if (basket.length === 0) return alert("Basket is empty!");
-      const data = {
-        contact_id: document.getElementById('contactSelect').value,
-        contact_name: document.getElementById('contactSelect').options[document.getElementById('contactSelect').selectedIndex].text,
-        itemIds: basket.map(i => i.id),
-        skuList: basket.map(i => i.sku).join(', '),
-        total: document.getElementById('totalDisplay').innerText,
-        comment: document.getElementById('orderComment').value
-      };
-      google.script.run.withSuccessHandler(() => google.script.host.close()).processSaveOrder(data);
-    }
+function submitOrder() {
+  if (basket.length === 0) return alert("Basket is empty!");
+  
+  const submitBtn = event.target;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+
+  // Ensure these keys match OrderLogic.js exactly
+  const data = {
+    contact_id: document.getElementById('contactSelect').value,
+    contact_name: document.getElementById('contactSelect').options[document.getElementById('contactSelect').selectedIndex].text,
+    itemIds: basket.map(i => i.id),
+    skuList: basket.map(i => i.sku).join(', '),
+    total: document.getElementById('totalDisplay').innerText,
+    comment: document.getElementById('orderComment').value,
+    payment_method: 'Bank Transfer' // You can add a dropdown for this in UI
+  };
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+       alert("Order " + res.id + " saved and logged in Finance!");
+       google.script.host.close();
+    })
+    .withFailureHandler(function(err) {
+       alert("Error: " + err.message);
+       submitBtn.disabled = false;
+       submitBtn.innerText = "Complete Purchase";
+    })
+    .processSaveOrder(data);
+}
+
+
   </script>
 </body>
 </html>
