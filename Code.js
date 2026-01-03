@@ -38,25 +38,23 @@ const SYSTEM_MAPPINGS = {
 };
 
 function onOpen() {
-  const ui = SpreadsheetApp.getUi(); // <--- Line 54 or above: Ensure this is defined!
+  const ui = SpreadsheetApp.getUi();
 
-  // MENU 1: DATA MANAGEMENT (The "Backend" stuff)
+  // MENU 1: DATA MANAGEMENT
   ui.createMenu('🗄️ LAD Data')
     .addItem('👥 Contacts', 'openContacts')
     .addItem('🎨 Originals', 'openOriginal')
     .addItem('🖼️ Products', 'openProduct')
     .addSeparator()
-    .addItem('1. Update Lookups [Sheet.Col]', 'updateHeaderComputedColumns')
-    .addItem('2. Update Short Values (_short_value)', 'updateAllComputedValues')
+    .addItem('1. Update Lookups', 'updateHeaderComputedColumns')
+    .addItem('2. Update Short Values', 'updateAllComputedValues')
     .addItem('3. Build All SKUs', 'updateAllSkuCodes')
-    .addSeparator()
-    .addItem('📦 Update Product Unit List', 'syncProductInventory')
     .addToUi();
 
-  // MENU 2: ORDERS & BILLING (The "Daily" stuff)
-ui.createMenu('🛒 LAD Orders')
-    .addItem('➕ New Customer Order', 'openOrderModal') // <--- Must match function name below
-    .addItem('📄 Generate PDF (Invoice/Cert)', 'generatePdfForSelectedRow')
+  // MENU 2: ORDERS
+  ui.createMenu('🛒 LAD Orders')
+    .addItem('➕ New Customer Order', 'openOrderModal') // Must match function name below
+    .addItem('📄 Generate PDF', 'generatePdfForSelectedRow')
     .addToUi();
 }
 

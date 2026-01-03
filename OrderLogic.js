@@ -1,7 +1,8 @@
 /**
- * In OrderLogic.js: Separated logic for Order management
+ * SERVER-SIDE: Modern Order Logic
  */
 
+// 1. Fetch Produced Inventory
 function getInventoryForOrder() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Product_Units");
@@ -15,7 +16,6 @@ function getInventoryForOrder() {
   const priceIdx = headers.indexOf("[product.sell_price]"); 
   const idIdx = headers.indexOf("inventory_id");
 
-  // Only return items with Status "Produced"
   return data.slice(1)
     .filter(row => String(row[statusIdx]).trim() === "Produced")
     .map(row => ({
@@ -25,33 +25,125 @@ function getInventoryForOrder() {
     }));
 }
 
+// 2. Fetch Customers
+function getContactsForOrder() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Contacts");
+  if (!sheet) return [];
+  return sheet.getDataRange().getValues().slice(1)
+    .filter(row => row[1] === "Customer") // Column 2 is 'type'
+    .map(row => ({ id: row[0], name: row[2] })); // ID and Artist/Company Name
+}
+
+// 3. Save Order & Log Transactions
 function processSaveOrder(orderData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const orderId = "orders_" + Math.random().toString(36).substring(2, 11);
   const timestamp = new Date();
-
-  // 1. Save Order
-  ss.getSheetByName("Orders").appendRow([
-    orderId, timestamp, orderData.contact_id, orderData.contact_name, 
-    orderData.total_amount, orderData.items.length, orderData.payment_method, orderData.notes
-  ]);
-
-  // 2. Log Transaction
+  
+  // Requirement: Use [sheet_name]_id pattern
+  const orderId = "orders_" + Math.random().toString(36).substring(2, 11);
   const transId = "transactions_" + Math.random().toString(36).substring(2, 11);
-  ss.getSheetByName("Transactions").appendRow([
-    transId, timestamp, "Income", "Sale: " + orderId, orderData.contact_name, orderData.total_amount
-  ]);
 
-  // 3. Set Inventory to 'Sold'
+  // A. Log in Orders Sheet (Includes SKU list and Comment)
+  const orderSheet = ss.getSheetByName("Orders");
+  if (orderSheet) {
+    orderSheet.appendRow([
+      orderId, timestamp, orderData.contact_id, orderData.contact_name,
+      orderData.total, orderData.itemIds.length, orderData.skuList, orderData.comment
+    ]);
+  }
+
+  // B. Log Financial Transaction
+  const transSheet = ss.getSheetByName("Transactions");
+  if (transSheet) {
+    transSheet.appendRow([
+      transId, timestamp, "Income", "Sale: " + orderId, orderData.contact_name, orderData.total
+    ]);
+  }
+
+  // C. Update Inventory to 'Sold'
   const invSheet = ss.getSheetByName("Product_Units");
   const invData = invSheet.getDataRange().getValues();
   const idIdx = invData[0].map(h => String(h).toLowerCase()).indexOf("inventory_id");
   const statusIdx = invData[0].map(h => String(h).toLowerCase()).indexOf("status");
 
-  orderData.items.forEach(itemId => {
-    const rIdx = invData.findIndex(r => r[idIdx] === itemId);
-    if (rIdx > -1) invSheet.getRange(rIdx + 1, statusIdx + 1).setValue("Sold");
+  orderData.itemIds.forEach(itemId => {
+    const rowIdx = invData.findIndex(r => r[idIdx] === itemId);
+    if (rowIdx > -1) invSheet.getRange(rowIdx + 1, statusIdx + 1).setValue("Sold");
   });
 
   return { success: true };
+}
+
+
+const ACCOUNTING_SHEET_ID = '1XvCu3_1-89zdbL5NKEpnQsPJCoVyNsLqszgPA6Xz8EM';
+
+// We only need the Sales-related templates here to "push" them
+const ACC_TEMPLATES = {
+  'Cash Sale': {
+    debit: { pcn: '512', name: 'Bank', ecdfBS: 'D.IV', ecdfPL: '' },
+    credit: { pcn: '701', name: 'Sales - Services', ecdfBS: '', ecdfPL: 'B.1' }
+  },
+  'Sales Invoice - Goods': {
+    debit: { pcn: '401', name: 'Trade Receivables', ecdfBS: 'D.II.1', ecdfPL: '' },
+    credit: { pcn: '702', name: 'Sales - Goods', ecdfBS: '', ecdfPL: 'B.1' }
+  }
+};
+
+function postToAccounting(orderData) {
+  try {
+    const accSS = SpreadsheetApp.openById(ACCOUNTING_SHEET_ID);
+    const accSheet = accSS.getSheetByName('Transactions');
+    
+    // Choose template: Cash vs Bank/Invoice
+    const type = (orderData.payment_method === 'Cash') ? 'Cash Sale' : 'Sales Invoice - Goods';
+    const template = ACC_TEMPLATES[type];
+    
+    // Generate Financial ID [sheet_name]_id
+    const transId = "transactions_" + Math.random().toString(36).substring(2, 11);
+    const timestamp = new Date();
+
+    // The order of these columns must match your Accounting Transactions sheet exactly
+    const row = [
+      transId,               // ID
+      timestamp,             // Date
+      type,                  // Type
+      "Order: " + orderData.skuList, // Description
+      orderData.contact_name, // Supplier/Customer
+      orderData.total,       // Amount (€)
+      template.debit.pcn,    // DR PCN
+      template.debit.name,   // DR Account
+      template.debit.ecdfBS, // DR eCDF BS
+      template.debit.ecdfPL, // DR eCDF P&L
+      template.credit.pcn,   // CR PCN
+      template.credit.name,  // CR Account
+      template.credit.ecdfBS,// CR eCDF BS
+      template.credit.ecdfPL,// CR eCDF P&L
+      0,                     // VAT (Set to 0 or calculate if needed)
+      'One Time',            // Frequency
+      'RS',                  // Paid By
+      'Sales Event',         // Event
+      'Sync from Inventory'  // Notes
+    ];
+
+    accSheet.appendRow(row);
+    return transId; // Return this to be saved in the Orders sheet
+    
+  } catch (e) {
+    Logger.log("Accounting Sync Failed: " + e.message);
+    return "SYNC_FAILED";
+  }
+}
+
+
+function processSaveOrder(orderData) {
+  // ... [Existing Logic to save order locally] ...
+
+  // TRIGGER THE BOOKKEEPER
+  const accRefId = postToAccounting(orderData);
+  
+  // Important: Now update the 'Orders' row you just created 
+  // with this accRefId so you have a visual link.
+  
+  return { success: true, accId: accRefId };
 }
