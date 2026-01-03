@@ -41,6 +41,10 @@ function postToAccounting(orderData, orderId) {
 /**
  * Fetches contacts for the Order Modal dropdown.
  */
+/**
+ * Fetches contacts for the Order Modal dropdown.
+ * Respects the [sheet_name]_id rule: contacts_id.
+ */
 function getContactsForOrder() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Contacts");
@@ -48,22 +52,34 @@ function getContactsForOrder() {
   
   const data = sheet.getDataRange().getValues();
   const headers = data[0].map(h => String(h).toLowerCase());
-  const idIdx = headers.indexOf("contact_id");
-  // Matches logic in Code.js for finding names
-  const fNameIdx = 3; // Column D
-  const lNameIdx = 5; // Column F
+  
+  // Rule: [sheet_name]_id
+  let idIdx = headers.indexOf("contacts_id");
+  if (idIdx === -1) idIdx = headers.indexOf("contact_id"); // Fallback
+  
+  // Find name columns by header to avoid index errors
+  let fNameIdx = headers.findIndex(h => h.includes("first name") || h === "first_name");
+  let lNameIdx = headers.findIndex(h => h.includes("last name") || h === "last_name");
+  
+  // Legacy fallback if headers aren't named standardly (Col 4 and 6)
+  if (fNameIdx === -1) fNameIdx = 3; 
+  if (lNameIdx === -1) lNameIdx = 5;
 
   return data.slice(1).map(row => {
-    const name = `${row[fNameIdx]} ${row[lNameIdx]}`.trim();
+    const firstName = row[fNameIdx] || "";
+    const lastName = row[lNameIdx] || "";
+    const fullName = `${firstName} ${lastName}`.trim();
+    
     return {
       id: String(row[idIdx]),
-      name: name || String(row[idIdx])
+      name: fullName || String(row[idIdx]) // Fallback to ID only if name is blank
     };
   }).filter(c => c.id).sort((a,b) => a.name.localeCompare(b.name));
 }
 
 /**
- * Fetches available inventory (Product_Units) for the Order Modal grid.
+ * Fetches inventory for the Order Modal grid.
+ * Respects the [sheet_name]_id rule: product_units_id.
  */
 function getInventoryForOrder() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -73,14 +89,15 @@ function getInventoryForOrder() {
   const data = sheet.getDataRange().getValues();
   const headers = data[0].map(h => String(h).toLowerCase());
   
-  const idIdx = headers.indexOf("inventory_id");
+  let idIdx = headers.indexOf("product_units_id");
+  if (idIdx === -1) idIdx = headers.indexOf("inventory_id"); // Fallback
+  
   const skuIdx = headers.indexOf("sku_code");
   const statusIdx = headers.indexOf("status");
-  // Assumes a price column exists or a computed [Product.price] column
   const priceIdx = headers.findIndex(h => h.includes("price"));
 
   return data.slice(1)
-    .filter(row => row[statusIdx] !== "Sold") // Only show available items
+    .filter(row => row[statusIdx] !== "Sold")
     .map(row => ({
       id: String(row[idIdx]),
       sku: row[skuIdx] || "No SKU",
@@ -88,7 +105,6 @@ function getInventoryForOrder() {
     }))
     .filter(item => item.id);
 }
-
 function processSaveOrder(orderData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const timestamp = new Date();
