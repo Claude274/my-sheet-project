@@ -49,17 +49,14 @@ function onOpen() {
     .addItem('1. Update Lookups', 'updateHeaderComputedColumns')
     .addItem('2. Update Short Values', 'updateAllComputedValues')
     .addItem('3. Build All SKUs', 'updateAllSkuCodes')
-    .addToUi();
+    .addToUi(); // This one was correct
 
-// MENU 2: ORDERS
+  // MENU 2: ORDERS
   ui.createMenu('🛒 LAD Orders')
     .addItem('➕ New Customer Order', 'openOrderModal')
-    .addItem('📄 Regenerate Invoice', 'uiRegenerateInvoice') // Added this item
-    .addSeparator()
-    .addItem('📄 Generate PDF (Selected Row)', 'generatePdfForSelectedRow')
-    .addToUi();
+    .addItem('📄 Regenerate Invoice', 'uiRegenerateInvoice')
+    .addToUi(); // <--- Added this line
 }
-
 
 
 function openContacts() { activateAndOpen('Contacts'); }
@@ -753,27 +750,24 @@ function getSetting(key) {
 /**
  * UI Prompt to regenerate an invoice by Order ID.
  */
+/**
+ * UI Prompt for Regeneration
+ */
 function uiRegenerateInvoice() {
   const ui = SpreadsheetApp.getUi();
-  const response = ui.prompt('Regenerate Invoice', 'Please enter the Order ID (e.g., ORD-XXXXX):', ui.ButtonSet.OK_CANCEL);
-  
+  const response = ui.prompt('Regenerate Invoice', 'Enter Order ID:', ui.ButtonSet.OK_CANCEL);
   if (response.getSelectedButton() == ui.Button.OK) {
-    const orderId = response.getResponseText().trim();
     try {
-      const url = generateOrderInvoiceFromId(orderId);
-      ui.alert("✅ Invoice Regenerated!\nLink: " + url);
-    } catch (e) {
-      ui.alert("❌ Error: " + e.message);
-    }
+      const url = generateOrderInvoiceFromId(response.getResponseText().trim());
+      ui.alert("✅ Invoice Created: " + url);
+    } catch (e) { ui.alert("❌ Error: " + e.message); }
   }
 }
 
+
 function getSetting(key) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Settings");
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Settings");
   const data = sheet.getDataRange().getValues();
-  for (let i = 0; i < data.length; i++) {
-    if (data[i][0] === key) return data[i][1];
-  }
-  return null;
+  const row = data.find(r => r[0] === key);
+  return row ? row[1] : null;
 }
