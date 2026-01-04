@@ -118,64 +118,37 @@ function createPdfInvoice(data) {
  */
 function prepareInvoiceData(orderId) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const orderSheet = ss.getSheetByName("Orders");
-  const orders = orderSheet.getDataRange().getValues();
-  const oHeaders = orders[0].map(h => String(h).toLowerCase());
+  const oRow = ss.getSheetByName("Orders").getDataRange().getValues()
+    .find(r => String(r[0]) === orderId); // Assuming order_id is Col A
   
-  // 1. Find the Order Row (using order_id from CSV)
-  const oRow = orders.find(r => String(r[oHeaders.indexOf("order_id")]) === orderId);
-  if (!oRow) throw new Error("Order ID not found in sheet.");
+  if (!oRow) throw new Error("Order not found.");
 
-  // 2. Fetch Company Info from Settings
-  const company = {
-    name: getSetting("COMPANY_NAME") || "LAD Art",
-    address: getSetting("COMPANY_ADDRESS") || "",
-    vat: getSetting("COMPANY_VAT") || "",
-    iban: getSetting("COMPANY_IBAN") || ""
-  };
+  // Get Contact (using contact_id)
+  const cData = ss.getSheetByName("Contacts").getDataRange().getValues();
+  const cRow = cData.find(r => String(r[0]) === String(oRow[2])); // contact_id is Col C
 
-  // 3. Fetch Customer Info (using contact_id)
-  const contactId = oRow[oHeaders.indexOf("contact_id")];
-  const contactSheet = ss.getSheetByName("Contacts");
-  const cData = contactSheet.getDataRange().getValues();
-  const cHeaders = cData[0].map(h => String(h).toLowerCase());
-  const cRow = cData.find(r => String(r[cHeaders.indexOf("contact_id")]) === String(contactId));
-  
-  const customer = {
-    name: oRow[oHeaders.indexOf("contact_name")],
-    email: cRow ? cRow[cHeaders.indexOf("email")] : "N/A",
-    address: cRow ? cRow[cHeaders.indexOf("address")] : "N/A",
-    phone: cRow ? cRow[cHeaders.indexOf("phone")] : ""
-  };
+  // Get Items & Parent Product Names
+  const unitIds = String(oRow[7] || "").split(",").map(id => id.trim()); // product_units_ids is Col H
+  const uSheet = ss.getSheetByName("Product_Units");
+  const pSheet = ss.getSheetByName("Product");
 
-  // 4. Fetch Product Details (Linking Unit to Parent Product)
-  const itemIdsString = String(oRow[oHeaders.indexOf("product_units_ids")] || "");
-  const itemIds = itemIdsString.split(",").map(id => id.trim()).filter(id => id);
-
-  const unitSheet = ss.getSheetByName("Product_Units");
-  const uData = unitSheet.getDataRange().getValues();
-  const uHeaders = uData[0].map(h => String(h).toLowerCase());
-  const uIdIdx = uHeaders.indexOf("product_units_id") !== -1 ? uHeaders.indexOf("product_units_id") : uHeaders.indexOf("inventory_id");
-  
-  const productSheet = ss.getSheetByName("Product");
-  const pData = productSheet.getDataRange().getValues();
-  const pHeaders = pData[0].map(h => String(h).toLowerCase());
-
-  const items = itemIds.map(uId => {
-    const unitRow = uData.find(r => String(r[uIdIdx]) === uId);
-    const productId = unitRow ? unitRow[uHeaders.indexOf("product_id")] : null;
-    const prodRow = pData.find(r => String(r[pHeaders.indexOf("product_id")]) === String(productId));
+  const items = unitIds.map(uId => {
+    const unit = uSheet.getDataRange().getValues().find(r => String(r[0]) === uId); // inventory_id is Col A
+    const prod = pSheet.getDataRange().getValues().find(r => String(r[0]) === String(unit[1])); // product_id is Col B
     
     return {
-      sku: unitRow ? unitRow[uHeaders.indexOf("sku_code")] : "N/A",
-      desc: prodRow ? prodRow[pHeaders.indexOf("product_name")] : "Unique Art Piece",
-      price: unitRow ? unitRow[uHeaders.indexOf("[product.sell_price]")] : 0
+      sku: unit[5], // SKU_Code is Col F
+      desc: prod ? prod[1] : "Art Piece", // product_name is Col B
+      price: unit[3] // [Product.sell_price] is Col D
     };
   });
 
-  return { orderId, date: oRow[oHeaders.indexOf("date")], total: oRow[oHeaders.indexOf("total_amount")], company, customer, items };
+  return { 
+    orderId, date: oRow[1], total: oRow[4], 
+    customer: { name: oRow[3], email: cRow[8], address: cRow[7] }, // email Col I, address Col H
+    items 
+  };
 }
-
 /**
  * Injects data into Google Doc and handles the Item Table
  */
