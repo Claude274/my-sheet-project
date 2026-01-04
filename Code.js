@@ -51,10 +51,12 @@ function onOpen() {
     .addItem('3. Build All SKUs', 'updateAllSkuCodes')
     .addToUi();
 
-  // MENU 2: ORDERS
+// MENU 2: ORDERS
   ui.createMenu('🛒 LAD Orders')
-    .addItem('➕ New Customer Order', 'openOrderModal') // Must match function name below
-    .addItem('📄 Generate PDF', 'generatePdfForSelectedRow')
+    .addItem('➕ New Customer Order', 'openOrderModal')
+    .addItem('📄 Regenerate Invoice', 'uiRegenerateInvoice') // Added this item
+    .addSeparator()
+    .addItem('📄 Generate PDF (Selected Row)', 'generatePdfForSelectedRow')
     .addToUi();
 }
 
@@ -744,6 +746,34 @@ function getSetting(key) {
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim() === key) return data[i][1];
+  }
+  return null;
+}
+
+/**
+ * UI Prompt to regenerate an invoice by Order ID.
+ */
+function uiRegenerateInvoice() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt('Regenerate Invoice', 'Please enter the Order ID (e.g., ORD-XXXXX):', ui.ButtonSet.OK_CANCEL);
+  
+  if (response.getSelectedButton() == ui.Button.OK) {
+    const orderId = response.getResponseText().trim();
+    try {
+      const url = generateOrderInvoiceFromId(orderId);
+      ui.alert("✅ Invoice Regenerated!\nLink: " + url);
+    } catch (e) {
+      ui.alert("❌ Error: " + e.message);
+    }
+  }
+}
+
+function getSetting(key) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Settings");
+  const data = sheet.getDataRange().getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (data[i][0] === key) return data[i][1];
   }
   return null;
 }
